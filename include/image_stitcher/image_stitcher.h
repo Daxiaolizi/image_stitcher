@@ -27,6 +27,7 @@ private:
     bool calibrating_;
     bool left_clicked_;
     bool right_clicked_;
+    bool image_updated_;
 
     std::string left_topic_;
     std::string right_topic_;

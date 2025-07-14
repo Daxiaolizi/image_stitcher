@@ -9,9 +9,9 @@ ImageStitcher::ImageStitcher(ros::NodeHandle &nh)
    nh_.param<std::string>("left_topic", left_topic_, "/hk_camera_left/image_raw");
    nh_.param<std::string>("right_topic", right_topic_, "/hk_camera_right/image_raw");
    nh_.param<std::string>("output_topic", output_topic_, "/hk_stitched_image");
-   nh_.param<std::string>("left_window_name", left_window_name_, "左图像");
-   nh_.param<std::string>("right_window_name", right_window_name_, "右图像");
-   nh_.param<std::string>("stitched_window_name", stitched_window_name_, "拼接图像");
+   nh_.param<std::string>("left_window_name", left_window_name_, "Left Image");
+   nh_.param<std::string>("right_window_name", right_window_name_, "Right Image");
+   nh_.param<std::string>("stitched_window_name", stitched_window_name_, "Stitched Image");
    nh_.param<double>("display_scale", display_scale_, 0.5);
    nh_.param<int>("circle_radius", circle_radius_, 5);
    nh_.param<double>("font_scale", font_scale_, 0.5);
@@ -59,6 +59,7 @@ void ImageStitcher::leftImageCallback(const sensor_msgs::ImageConstPtr &msg) {
             ROS_ERROR("左相机回调 cv_bridge 异常: %s", e.what());
         }
     }
+     image_updated_ = true;
 }
 
 void ImageStitcher::rightImageCallback(const sensor_msgs::ImageConstPtr& msg) {
@@ -74,6 +75,7 @@ void ImageStitcher::rightImageCallback(const sensor_msgs::ImageConstPtr& msg) {
             ROS_ERROR("右相机回调 cv_bridge 异常: %s", e.what());
         }
     }
+     image_updated_ = true;
 }
 
 
@@ -139,6 +141,7 @@ void ImageStitcher::displayImages() {
 }
 
 void ImageStitcher::stitchImages() {
+    ros::Time t1 = ros::Time::now();
     if (left_image_.empty() || right_image_.empty()) {
         ROS_WARN("图像为空，跳过拼接");
         return;
@@ -207,12 +210,22 @@ void ImageStitcher::stitchImages() {
     msg->header.stamp = ros::Time::now();
     msg->header.frame_id = "stitched_frame";
     pub_stitched_.publish(msg);
+    ros::Time t2 = ros::Time::now();
+    ROS_INFO("拼接耗时: %.3f 秒", (t2 - t1).toSec());
 
     ROS_INFO("拼接图像已发布至 %s", output_topic_.c_str());
 }
 
 void  ImageStitcher::run() {
-    ros::Duration(1.0).sleep();  // 等待 1s 让图像到来
+    // 等待图像准备好
+    ROS_INFO("等待图像到达...");
+    ros::Rate wait_rate(10);
+    while (ros::ok() && (left_image_.empty() || right_image_.empty())) {
+        wait_rate.sleep();
+    }
+    ROS_INFO("图像已准备好，开始运行。");
+//    ros::Duration(1.0).sleep();  // 等待 1s 让图像到来
+    ros::Rate rate(60);
     while (ros::ok()) {
         displayImages();
 
@@ -237,15 +250,22 @@ void  ImageStitcher::run() {
             break;
         }
             stitchImages();
-            ros::spinOnce();
-    }
-        cv::destroyAllWindows();
+            image_updated_ = false;
+        }
+
+        displayImages();  // 不影响回调
+        rate.sleep();
+
+//        cv::destroyAllWindows();
 }
 int main(int argc, char** argv) {
     ros::init(argc, argv, "image_stitcher");
     ros::NodeHandle nh;
     ImageStitcher stitcher(nh);
+    ros::AsyncSpinner spinner(1);
+    spinner.start();
     stitcher.run();
+    ros::waitForShutdown();
     return 0;
 
 }

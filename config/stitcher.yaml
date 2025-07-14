@@ -1,13 +1,13 @@
 left_topic: "/hk_camera_left/image_raw"
 right_topic: "/hk_camera_right/image_raw"
 output_topic: "/hk_stitched_image"
-left_window_name: "左图像"
-right_window_name: "右图像"
-stitched_window_name: "拼接图像"
+left_window_name: "Left Image"
+right_window_name: "Right Image"
+stitched_window_name: "Stitched Image"
 display_scale: 0.5  # 图像显示缩放比例
 circle_radius: 5  # 点击点圆的半径
 circle_color: [0, 0, 255]  # 点击点颜色 (B, G, R)
 font_scale: 0.5  # 坐标文字缩放
 font_thickness: 2  # 坐标文字粗细
 text_color: [0, 0, 255]  # 坐标文字颜色 (B, G, R)
-wait_key_delay: 30  # 键盘检测延时 (ms)
+wait_key_delay: 1  # 键盘检测延时 (ms)
