@@ -1,0 +1,7 @@
+<launch>
+    
+<!--    <include file="$(find hk_camera)/launch/double_device.launch"/>-->
+
+    <rosparam file="$(find image_stitcher)/config/stitcher.yaml" command="load" ns="image_stitcher" />
+    <node pkg="image_stitcher" type="image_stitcher" name="image_stitcher" output="screen" />
+</launch>
