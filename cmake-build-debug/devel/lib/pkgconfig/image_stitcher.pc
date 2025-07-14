@@ -1,8 +1,0 @@
-prefix=/home/dxliz/strans_ws/src/image_stitcher/cmake-build-debug/devel
-
-Name: image_stitcher
-Description: Description of image_stitcher
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 

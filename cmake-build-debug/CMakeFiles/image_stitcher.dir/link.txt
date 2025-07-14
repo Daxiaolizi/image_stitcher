@@ -1,1 +1,0 @@
-/usr/bin/g++  -g  -rdynamic CMakeFiles/image_stitcher.dir/src/image_stitcher.cpp.o  -o devel/lib/image_stitcher/image_stitcher 
