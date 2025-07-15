@@ -7,6 +7,9 @@
 #include <sensor_msgs/image_encodings.h>
 #include <opencv2/opencv.hpp>
 #include <string>
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
 
 class ImageStitcher {
 public:
@@ -28,6 +31,9 @@ private:
     bool left_clicked_;
     bool right_clicked_;
     bool image_updated_;
+    bool display_enabled_ = true;
+
+
 
     std::string left_topic_;
     std::string right_topic_;
@@ -53,7 +59,10 @@ private:
     void handleMouseLeft(int event, int x, int y, int flags);
     void handleMouseRight(int event, int x, int y, int flags);
     void displayImages();
+    void syncImageCallback(const sensor_msgs::ImageConstPtr& left_msg,
+                           const sensor_msgs::ImageConstPtr& right_msg);
     void stitchImages();
+
 
 };
 

@@ -18,6 +18,7 @@ ImageStitcher::ImageStitcher(ros::NodeHandle &nh)
    nh_.param<int>("font_thickness", font_thickness_, 2);
    nh_.param<int>("wait_key_delay", wait_key_delay_, 30);
 
+
    //color
    std::vector<int> circle_color_vec;
    if(nh_.getParam("circle_color", circle_color_vec) && circle_color_vec.size() == 3 ){
@@ -36,6 +37,8 @@ ImageStitcher::ImageStitcher(ros::NodeHandle &nh)
      if (sub_right_.getNumPublishers() == 0) {
          ROS_ERROR("No publishers on right_topic %s", right_topic_.c_str());
      }
+//    sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(SyncPolicy(10), sub_left_, sub_right_);
+//    sync_->registerCallback(boost::bind(&ImageStitcher::syncImageCallback, this, _1, _2));
    pub_stitched_ = nh_.advertise<sensor_msgs::Image>(output_topic_, 1);
 
      cv::namedWindow(left_window_name_, cv::WINDOW_NORMAL);
@@ -109,43 +112,74 @@ void ImageStitcher::handleMouseRight(int event, int x, int y, int flags) {
 
 
 void ImageStitcher::displayImages() {
+    if (!display_enabled_) return;
+    try {
     if (!left_image_.empty()) {
         cv::Mat display_left;
-        cv::resize(left_image_, display_left, cv::Size(), display_scale_, display_scale_);
-        if (left_clicked_) {
-            cv::Point scaled_point(left_point_.x * display_scale_, left_point_.y * display_scale_);
-            cv::circle(display_left, scaled_point, circle_radius_, circle_color_, -1);
-            std::string text = "(" + std::to_string(left_point_.x) + ", " + std::to_string(left_point_.y) + ")";
-            cv::putText(display_left, text, scaled_point + cv::Point(10, 10),
-                        cv::FONT_HERSHEY_SIMPLEX, font_scale_, text_color_, font_thickness_);
+        try {
+            cv::resize(left_image_, display_left, cv::Size(), display_scale_, display_scale_);
+            if (left_clicked_) {
+                cv::Point scaled_point(left_point_.x * display_scale_, left_point_.y * display_scale_);
+                cv::circle(display_left, scaled_point, circle_radius_, circle_color_, -1);
+                std::string text = "(" + std::to_string(left_point_.x) + ", " + std::to_string(left_point_.y) + ")";
+                cv::putText(display_left, text, scaled_point + cv::Point(10, 10),
+                            cv::FONT_HERSHEY_SIMPLEX, font_scale_, text_color_, font_thickness_);
+            }
+            cv::imshow(left_window_name_, display_left);
+        } catch (const cv::Exception& e) {
+            ROS_ERROR("left_image resize error : %s", e.what());
         }
-        cv::imshow(left_window_name_, display_left);
     } else {
         ROS_WARN("Left image is empty, skipping display.");
     }
 
     if (!right_image_.empty()) {
         cv::Mat display_right;
-        cv::resize(right_image_, display_right, cv::Size(), display_scale_, display_scale_);
-        if (right_clicked_) {
-            cv::Point scaled_point(right_point_.x * display_scale_, right_point_.y * display_scale_);
-            cv::circle(display_right, scaled_point, circle_radius_, circle_color_, -1);
-            std::string text = "(" + std::to_string(right_point_.x) + ", " + std::to_string(right_point_.y) + ")";
-            cv::putText(display_right, text, scaled_point + cv::Point(10, 10),
-                        cv::FONT_HERSHEY_SIMPLEX, font_scale_, text_color_, font_thickness_);
+        try {
+            cv::resize(right_image_, display_right, cv::Size(), display_scale_, display_scale_);
+            if (right_clicked_) {
+                cv::Point scaled_point(right_point_.x * display_scale_, right_point_.y * display_scale_);
+                cv::circle(display_right, scaled_point, circle_radius_, circle_color_, -1);
+                std::string text = "(" + std::to_string(right_point_.x) + ", " + std::to_string(right_point_.y) + ")";
+                cv::putText(display_right, text, scaled_point + cv::Point(10, 10),
+                            cv::FONT_HERSHEY_SIMPLEX, font_scale_, text_color_, font_thickness_);
+            }
+            cv::imshow(right_window_name_, display_right);
+        } catch (const cv::Exception& e) {
+            ROS_ERROR("right_image resize error : %s", e.what());
         }
-        cv::imshow(right_window_name_, display_right);
     } else {
         ROS_WARN("Right image is empty, skipping display.");
     }
+    } catch (const std::exception& e) {
+        ROS_ERROR("displayImages 出现异常: %s", e.what());
+    } catch (...) {
+        ROS_ERROR("displayImages 出现未知异常");
+    }
+
 }
+
+//void ImageStitcher::syncImageCallback(const sensor_msgs::ImageConstPtr& left_msg,
+//                                      const sensor_msgs::ImageConstPtr& right_msg) {
+//    ROS_INFO("接收到左右图像消息");
+//    try {
+//        left_image_ = cv_bridge::toCvCopy(left_msg, sensor_msgs::image_encodings::BGR8)->image.clone();
+//        right_image_ = cv_bridge::toCvCopy(right_msg, sensor_msgs::image_encodings::BGR8)->image.clone();
+//        image_updated_ = true;
+//    } catch (cv_bridge::Exception& e) {
+//        ROS_ERROR("cv_bridge 错误: %s", e.what());
+//    }
+//}
+
 
 void ImageStitcher::stitchImages() {
     ros::Time t1 = ros::Time::now();
-    if (left_image_.empty() || right_image_.empty()) {
-        ROS_WARN("图像为空，跳过拼接");
-        return;
-    }
+    try {
+        if (left_image_.empty() || right_image_.empty()) {
+            ROS_WARN("图像为空，跳过拼接");
+            return;
+        }
+
 
     // 如果用户点击了左右图像，进行校准
     if (left_clicked_ && right_clicked_) {
@@ -168,7 +202,7 @@ void ImageStitcher::stitchImages() {
     int dx = offset_.x;
     int dy = offset_.y;
 
-    // 以下拼接逻辑不变
+
     int W1 = left_image_.cols;
     int H1 = left_image_.rows;
     int W2 = right_image_.cols;
@@ -180,6 +214,10 @@ void ImageStitcher::stitchImages() {
     int bottom = std::max(H1, dy + H2);
     int W = right - left;
     int H = bottom - top;
+        if (W <= 0 || H <= 0) {
+            ROS_ERROR("拼接图像尺寸无效，W=%d, H=%d，跳过该帧", W, H);
+            return;
+        }
     cv::Mat stitched = cv::Mat::zeros(H, W, left_image_.type());
 
     cv::Rect roi1(-left, -top, W1, H1);
@@ -197,10 +235,20 @@ void ImageStitcher::stitchImages() {
                                                  intersect2.width, intersect2.height));
         src_roi2.copyTo(stitched(intersect2));
     }
+        if (stitched.empty()) {
+            ROS_WARN("拼接结果为空，跳过显示与发布");
+            return;
+        }
+        if (display_enabled_) {
+            try {
+                cv::Mat display_stitched;
+                cv::resize(stitched, display_stitched, cv::Size(), display_scale_, display_scale_);
+                cv::imshow(stitched_window_name_, display_stitched);
+            } catch (cv::Exception &e) {
+                ROS_ERROR("stitch_image resize error: %s", e.what());
+            }
 
-    cv::Mat display_stitched;
-    cv::resize(stitched, display_stitched, cv::Size(), display_scale_, display_scale_);
-    cv::imshow(stitched_window_name_, display_stitched);
+        }
 
     // 发布拼接图像
     cv_bridge::CvImage cv_img;
@@ -212,8 +260,15 @@ void ImageStitcher::stitchImages() {
     pub_stitched_.publish(msg);
     ros::Time t2 = ros::Time::now();
     ROS_INFO("拼接耗时: %.3f 秒", (t2 - t1).toSec());
-
     ROS_INFO("拼接图像已发布至 %s", output_topic_.c_str());
+
+    } catch (const cv::Exception& e) {
+        ROS_ERROR("OpenCV 异常: %s", e.what());
+    } catch (const std::exception& e) {
+        ROS_ERROR("标准异常: %s", e.what());
+    } catch (...) {
+        ROS_ERROR("未知异常，跳过该帧拼接");
+    }
 }
 
 void  ImageStitcher::run() {
@@ -236,18 +291,12 @@ void  ImageStitcher::run() {
             right_clicked_ = false;
             has_calibrated_ = false;  // 清除旧 offset
             ROS_INFO("校准已开始。请在图像上点击选择点。");
-        } else if (key == '2') {
-            if (left_clicked_) {
-                left_clicked_ = false;
-                ROS_INFO("1: 已撤销左图像上的最后一次点击");
-            } else if (right_clicked_) {
-                right_clicked_ = false;
-                ROS_INFO("1: 已撤销右图像上的最后一次点击");
-            }
         }
-        else if (key == 'q')
-        {
-            break;
+        else if (key != -1) {
+            // 任意键按下后禁用窗口显示
+            ROS_INFO("按键 '%c' 被按下，关闭图像显示窗口，继续发布图像。", key);
+            cv::destroyAllWindows();        // 关闭所有窗口
+            display_enabled_ = false;       // 停止后续显示
         }
             stitchImages();
             image_updated_ = false;
