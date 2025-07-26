@@ -1,7 +1,9 @@
+
 //#include "image_stitcher.h"
 #include "../include/image_stitcher/image_stitcher.h"
 #include <ros/package.h>
 #include <vector>
+#include <CL/cl.h>
 
 ImageStitcher::ImageStitcher(ros::NodeHandle &nh)
     : nh_(nh), it_(nh), calibrating_(false), left_clicked_(false), right_clicked_(false)
@@ -28,12 +30,12 @@ ImageStitcher::ImageStitcher(ros::NodeHandle &nh)
        circle_color_ = cv::Scalar(0, 0, 255);//red
        ROS_WARN("Failed to load circle_color, using default [0, 0, 255]");
    }
-
-   sub_left_ = it_.subscribe(left_topic_, 1, &ImageStitcher::leftImageCallback, this);
+     image_transport::TransportHints hints("compressed");
+   sub_left_ = it_.subscribe(left_topic_, 1, &ImageStitcher::leftImageCallback, this, hints);
      if (sub_left_.getNumPublishers() == 0) {
          ROS_ERROR("No publishers on left_topic %s", left_topic_.c_str());
      }
-   sub_right_ = it_.subscribe(right_topic_, 1, &ImageStitcher::rightImageCallback, this);
+   sub_right_ = it_.subscribe(right_topic_, 1, &ImageStitcher::rightImageCallback, this, hints);
      if (sub_right_.getNumPublishers() == 0) {
          ROS_ERROR("No publishers on right_topic %s", right_topic_.c_str());
      }
@@ -53,7 +55,9 @@ void ImageStitcher::leftImageCallback(const sensor_msgs::ImageConstPtr &msg) {
 //    ROS_INFO("收到左图像: 大小 %dx%d, 编码 %s", msg->width, msg->height, msg->encoding.c_str());
     if (!calibrating_) {
         try {
-            left_image_ = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8)->image.clone();
+            cv::Mat image = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8)->image;
+            std::lock_guard<std::mutex> lock(image_mutex_);
+            left_image_ = image.clone();
 
 //            ros::Time now = ros::Time::now();
 //            ros::Duration lag = now - msg->header.stamp;
@@ -69,7 +73,9 @@ void ImageStitcher::rightImageCallback(const sensor_msgs::ImageConstPtr& msg) {
 //    ROS_INFO("收到右图像: 大小 %dx%d, 编码 %s", msg->width, msg->height, msg->encoding.c_str());
     if (!calibrating_) {
         try {
-            right_image_ = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8)->image.clone();
+            cv::Mat image = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8)->image;
+            std::lock_guard<std::mutex> lock(image_mutex_);
+            right_image_ = image.clone();
 
 //            ros::Time now = ros::Time::now();
 //            ros::Duration lag = now - msg->header.stamp;
@@ -113,11 +119,19 @@ void ImageStitcher::handleMouseRight(int event, int x, int y, int flags) {
 
 void ImageStitcher::displayImages() {
     if (!display_enabled_) return;
+    cv::Mat left, right;
+    {
+        std::lock_guard<std::mutex> lock(image_mutex_);
+        if (left_image_.empty() || right_image_.empty()) return;  //空指针锁
+        left = left_image_.clone();
+        right = right_image_.clone();
+
+    }
     try {
-    if (!left_image_.empty()) {
+    if (!left.empty()) {
         cv::Mat display_left;
         try {
-            cv::resize(left_image_, display_left, cv::Size(), display_scale_, display_scale_);
+            cv::resize(left, display_left, cv::Size(), display_scale_, display_scale_);
             if (left_clicked_) {
                 cv::Point scaled_point(left_point_.x * display_scale_, left_point_.y * display_scale_);
                 cv::circle(display_left, scaled_point, circle_radius_, circle_color_, -1);
@@ -133,10 +147,10 @@ void ImageStitcher::displayImages() {
         ROS_WARN("Left image is empty, skipping display.");
     }
 
-    if (!right_image_.empty()) {
+    if (!right.empty()) {
         cv::Mat display_right;
         try {
-            cv::resize(right_image_, display_right, cv::Size(), display_scale_, display_scale_);
+            cv::resize(right, display_right, cv::Size(), display_scale_, display_scale_);
             if (right_clicked_) {
                 cv::Point scaled_point(right_point_.x * display_scale_, right_point_.y * display_scale_);
                 cv::circle(display_right, scaled_point, circle_radius_, circle_color_, -1);
@@ -174,14 +188,23 @@ void ImageStitcher::displayImages() {
 
 void ImageStitcher::stitchImages() {
     ros::Time t1 = ros::Time::now();
-    try {
+    cv::Mat left, right;
+    {
+        std::lock_guard<std::mutex> lock(image_mutex_);
         if (left_image_.empty() || right_image_.empty()) {
+            ROS_WARN("图像为空，跳过拼接");
+            return;
+        }
+        left = left_image_.clone();
+        right = right_image_.clone();
+    }
+    try {
+        if (left.empty() || right.empty()) {
             ROS_WARN("图像为空，跳过拼接");
             return;
         }
 
 
-    // 如果用户点击了左右图像，进行校准
     if (left_clicked_ && right_clicked_) {
         int dx = left_point_.x - right_point_.x;
         int dy = left_point_.y - right_point_.y;
@@ -203,35 +226,35 @@ void ImageStitcher::stitchImages() {
     int dy = offset_.y;
 
 
-    int W1 = left_image_.cols;
-    int H1 = left_image_.rows;
-    int W2 = right_image_.cols;
-    int H2 = right_image_.rows;
+    int W1 = left.cols;
+    int H1 = left.rows;
+    int W2 = right.cols;
+    int H2 = right.rows;
 
-    int left = std::min(0, dx);
-    int top = std::min(0, dy);
-    int right = std::max(W1, dx + W2);
-    int bottom = std::max(H1, dy + H2);
-    int W = right - left;
-    int H = bottom - top;
+    int x0 = std::min(0, dx);
+    int y0 = std::min(0, dy);
+    int x1 = std::max(W1, dx + W2);
+    int y1 = std::max(H1, dy + H2);
+    int W = x1 - x0;
+    int H = y1 - y0;
         if (W <= 0 || H <= 0) {
             ROS_ERROR("拼接图像尺寸无效，W=%d, H=%d，跳过该帧", W, H);
             return;
         }
-    cv::Mat stitched = cv::Mat::zeros(H, W, left_image_.type());
+    cv::Mat stitched = cv::Mat::zeros(H, W, left.type());
 
-    cv::Rect roi1(-left, -top, W1, H1);
+    cv::Rect roi1(-x0, -y0, W1, H1);
     cv::Rect intersect1 = roi1 & cv::Rect(0, 0, W, H);
     if (!intersect1.empty()) {
-        cv::Mat src_roi1 = left_image_(cv::Rect(intersect1.x + left, intersect1.y + top,
+        cv::Mat src_roi1 = left(cv::Rect(intersect1.x + x0, intersect1.y + y0,
                                                 intersect1.width, intersect1.height));
         src_roi1.copyTo(stitched(intersect1));
     }
 
-    cv::Rect roi2(dx - left, dy - top, W2, H2);
+    cv::Rect roi2(dx - x0, dy - y0, W2, H2);
     cv::Rect intersect2 = roi2 & cv::Rect(0, 0, W, H);
     if (!intersect2.empty()) {
-        cv::Mat src_roi2 = right_image_(cv::Rect(intersect2.x - (dx - left), intersect2.y - (dy - top),
+        cv::Mat src_roi2 = right(cv::Rect(intersect2.x - (dx - x0), intersect2.y - (dy - y0),
                                                  intersect2.width, intersect2.height));
         src_roi2.copyTo(stitched(intersect2));
     }
@@ -276,6 +299,10 @@ void  ImageStitcher::run() {
     ROS_INFO("等待图像到达...");
     ros::Rate wait_rate(10);
     while (ros::ok() && (left_image_.empty() || right_image_.empty())) {
+        {
+            std::lock_guard<std::mutex> lock(image_mutex_);
+            if (!left_image_.empty() && !right_image_.empty()) break;
+        }
         wait_rate.sleep();
     }
     ROS_INFO("图像已准备好，开始运行。");

@@ -10,6 +10,8 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
+#include <mutex>
+
 
 class ImageStitcher {
 public:
@@ -23,10 +25,12 @@ private:
     image_transport::Subscriber sub_right_;
     ros::Publisher pub_stitched_;
 
+
     cv::Mat left_image_;
     cv::Mat right_image_;
     cv::Point left_point_;
     cv::Point right_point_;
+    std::mutex image_mutex_;
     bool calibrating_;
     bool left_clicked_;
     bool right_clicked_;
